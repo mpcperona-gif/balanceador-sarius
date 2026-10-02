@@ -1,202 +1,258 @@
-/* Gestor Avanzado AM + Envíos Rápidos al Mercado (5 Edificios) */
-(function() {
+/* Gestor Masivo de Edificios y Envíos (Estilo WH Balancer) */
+(async function() {
+    const LS_TEMPLATES = 'tw_am_mass_templates';
+    const LS_ASSIGN = 'tw_am_mass_assign';
+    const LS_REQS = 'tw_am_mass_reqs';
+
     const B_MAP = {0:"main", 1:"barracks", 2:"stable", 3:"garage", 4:"church", 5:"church_f", 6:"watchtower", 7:"snob", 8:"smith", 9:"place", 10:"statue", 11:"market", 12:"wood", 13:"stone", 14:"iron", 15:"farm", 16:"storage", 17:"hide", 18:"wall"};
-    const B_ES = {"main":"Edificio Principal", "barracks":"Cuartel", "stable":"Cuadra", "garage":"Taller", "church":"Iglesia", "church_f":"Primera Iglesia", "watchtower":"Torre", "snob":"Corte", "smith":"Herrería", "place":"Plaza", "statue":"Estatua", "market":"Mercado", "wood":"Leñador", "stone":"Barrera", "iron":"Mina", "farm":"Granja", "storage":"Almacén", "hide":"Escondite", "wall":"Muralla"};
-    
-    let templates = JSON.parse(localStorage.getItem('tw_am_templates') || '{}');
-    let assignments = JSON.parse(localStorage.getItem('tw_am_assignments') || '{}');
-    let requests = JSON.parse(localStorage.getItem('tw_am_reqs') || '{}');
+
+    let templates = JSON.parse(localStorage.getItem(LS_TEMPLATES) || '{}');
+    let assignments = JSON.parse(localStorage.getItem(LS_ASSIGN) || '{}');
+    let reqs = JSON.parse(localStorage.getItem(LS_REQS) || '{}');
 
     // ==========================================
-    // 1. MODO MERCADO: ENVÍO RÁPIDO CON "ENTER"
+    // 1. MODO MERCADO: SPAM DE "ENTER" (Envío rápido)
     // ==========================================
     if (game_data.screen === 'market') {
-        // Pantalla 2: Confirmar el envío
+        // Pantalla de Confirmación
         if (window.location.href.includes('try=confirm_send')) {
             let btn = $('#troop_confirm_submit');
             if (btn.length) {
                 btn.focus();
-                if(window.UI) UI.SuccessMessage('Pulsa ENTER para confirmar el envío.');
-                return; // Cortamos aquí para que el usuario pulse Enter
+                if(window.UI) UI.SuccessMessage('¡Pulsa ENTER para confirmar el envío!');
+                return;
             }
         }
         
-        // Pantalla 1: Preparar el envío
+        // Pantalla de Preparar Envío
         if (!game_data.mode || game_data.mode === 'send') {
-            let target = null, targetId = null;
-            // Buscar la primera petición que necesite recursos
-            for (let id in requests) {
-                if (requests[id].w > 0 || requests[id].s > 0 || requests[id].i > 0) {
-                    target = requests[id]; targetId = id; break;
+            let targetCoord = null, targetNeeds = null;
+
+            // Buscar el primer pueblo de la lista que necesite recursos
+            for (let coord in reqs) {
+                if (coord === game_data.village.coord) continue; // No enviarse a sí mismo
+                if (reqs[coord].w > 0 || reqs[coord].s > 0 || reqs[coord].i > 0) {
+                    targetCoord = coord; targetNeeds = reqs[coord]; break;
                 }
             }
 
-            if (target) {
-                $('.target-input-field').val(target.c);
-                
-                let maxM = game_data.village.trader_amount * 1000;
-                let w_send = Math.min(target.w, game_data.village.wood);
-                let s_send = Math.min(target.s, game_data.village.stone);
-                let i_send = Math.min(target.i, game_data.village.iron);
-
-                // Ajustar si no tenemos suficientes mercaderes
-                let total = w_send + s_send + i_send;
-                if (total > maxM) {
-                    let rem = maxM;
-                    w_send = Math.min(w_send, rem); rem -= w_send;
-                    s_send = Math.min(s_send, rem); rem -= s_send;
-                    i_send = Math.min(i_send, rem); rem -= i_send;
-                }
-
-                if(total === 0) {
-                    if(window.UI) UI.ErrorMessage('No tienes recursos suficientes en este pueblo para enviar.');
-                } else {
-                    $('input[name="wood"]').val(w_send);
-                    $('input[name="stone"]').val(s_send);
-                    $('input[name="iron"]').val(i_send);
-
-                    // Descontar de la lista para el próximo clic
-                    target.w -= w_send; target.s -= s_send; target.i -= i_send;
-                    if(target.w <= 0 && target.s <= 0 && target.i <= 0) delete requests[targetId];
-                    else requests[targetId] = target;
-                    localStorage.setItem('tw_am_reqs', JSON.stringify(requests));
-
-                    $('input[type="submit"]').focus();
-                    if(window.UI) UI.SuccessMessage(`Enviando a ${target.c}... ¡Pulsa ENTER!`);
-                }
-            } else {
-                if(window.UI) UI.SuccessMessage('¡No hay ningún pueblo que necesite recursos!');
+            if (!targetCoord) {
+                if(window.UI) UI.SuccessMessage('✅ ¡Todos los pueblos están listos! No hay peticiones pendientes.');
+                return;
             }
+
+            $('.target-input-field').val(targetCoord);
+            
+            let merchants = parseInt($('#market_merchant_available_count').text(), 10) || 0;
+            let maxCapacity = merchants * 1000;
+            
+            let mw = Math.min(targetNeeds.w, game_data.village.wood);
+            let ms = Math.min(targetNeeds.s, game_data.village.stone);
+            let mi = Math.min(targetNeeds.i, game_data.village.iron);
+
+            // Ajustar si no tenemos suficientes mercaderes
+            if (mw + ms + mi > maxCapacity) {
+                let cap = maxCapacity;
+                mw = Math.min(mw, cap); cap -= mw;
+                ms = Math.min(ms, cap); cap -= ms;
+                mi = Math.min(mi, cap); cap -= mi;
+            }
+
+            if (mw + ms + mi === 0) {
+                if(window.UI) UI.ErrorMessage('No tienes recursos/mercaderes suficientes para enviar desde aquí.');
+                return;
+            }
+
+            $('input[name="wood"]').val(mw);
+            $('input[name="stone"]').val(ms);
+            $('input[name="iron"]').val(mi);
+
+            // Descontar para el siguiente click
+            targetNeeds.w -= mw; targetNeeds.s -= ms; targetNeeds.i -= mi;
+            if (targetNeeds.w <= 0 && targetNeeds.s <= 0 && targetNeeds.i <= 0) delete reqs[targetCoord];
+            else reqs[targetCoord] = targetNeeds;
+            localStorage.setItem(LS_REQS, JSON.stringify(reqs));
+
+            $('input[type="submit"]').focus();
+            if(window.UI) UI.SuccessMessage(`Calculado para ${targetCoord}... ¡Pulsa ENTER!`);
+            return;
         }
     }
 
     // ==========================================
-    // 2. MODO GESTOR: VISION GENERAL (Receptor)
+    // 2. MODO GESTOR MASIVO (Panel de Configuración)
     // ==========================================
-    if ($('#am_advanced_panel').length > 0) return;
+    if ($('#mass_am_modal').length > 0) return;
     
-    let pendingCount = Object.keys(requests).length;
     let html = `
-        <div id="am_advanced_panel" class="vis" style="position:fixed; top:50px; right:10px; z-index:99999; padding:15px; width:350px; background: #e3d5b3; border: 2px solid #7d510f; border-radius: 5px; box-shadow: 2px 2px 10px rgba(0,0,0,0.5);">
-            <h3 style="margin-top:0; border-bottom: 1px solid #7d510f; padding-bottom:5px;">
-                Gestor (5 Edificios)
-                <span style="float:right; cursor:pointer; color:red;" onclick="$('#am_advanced_panel').remove();">✖</span>
-            </h3>
+        <div id="mass_am_modal" style="position:fixed; top:5vh; left:50%; transform:translateX(-50%); width:600px; max-height:90vh; background:#e3d5b3; border:3px solid #7d510f; border-radius:8px; z-index:99999; padding:20px; overflow-y:auto; box-shadow: 0px 5px 15px rgba(0,0,0,0.8);">
+            <h2 style="margin-top:0; border-bottom:1px solid #7d510f; padding-bottom:5px;">
+                Gestor Masivo AM (Estilo WH Balancer)
+                <a href="#" onclick="$('#mass_am_modal').remove(); return false;" style="float:right; font-weight:bold; color:#c00; text-decoration:none;">✖ CERRAR</a>
+            </h2>
             
-            <div style="margin-bottom: 10px;">
-                <b>Plantillas:</b>
-                <input type="text" id="am_t_name" placeholder="Nombre" style="width:40%;">
-                <input type="text" id="am_t_b64" placeholder="Base64..." style="width:55%;">
-                <button class="btn" id="btn_save_template" style="width:100%; margin-top:2px;">Guardar / Actualizar</button>
-            </div>
+            <!-- PLANTILLAS -->
+            <table class="vis" style="width:100%; margin-bottom:15px;">
+                <tr><th colspan="2">1. Guardar Plantillas de Construcción</th></tr>
+                <tr>
+                    <td style="padding:10px;">
+                        <input type="text" id="tpl_name" placeholder="Nombre (ej. Ofensiva)" style="width:25%;">
+                        <input type="text" id="tpl_b64" placeholder="Pega el Base64 aquí..." style="width:50%;">
+                        <button id="btn_add_tpl" class="btn">Guardar</button>
+                    </td>
+                </tr>
+                <tr><td id="list_tpls" style="font-size:11px; padding:5px; color:#555;"></td></tr>
+            </table>
 
-            <div style="margin-bottom: 10px;">
-                <b>Asignar a este pueblo:</b><br>
-                <select id="am_t_select" style="width:70%;"></select>
-                <button class="btn" id="btn_assign" style="width:25%;">Poner</button>
-            </div>
+            <!-- ASIGNACIÓN MASIVA -->
+            <table class="vis" style="width:100%; margin-bottom:15px;">
+                <tr><th colspan="2">2. Asignar Plantilla a Varios Pueblos (Pega Coordenadas)</th></tr>
+                <tr>
+                    <td width="35%" style="padding:10px; vertical-align:top;">
+                        <select id="mass_tpl_select" style="width:100%; margin-bottom:10px;"></select>
+                        <button id="btn_assign" class="btn" style="width:100%;">Asignar a Coordenadas ➔</button>
+                    </td>
+                    <td style="padding:10px;">
+                        <textarea id="mass_coords" style="width:100%; height:80px;" placeholder="Pega una lista de coordenadas aquí. Ej: 555|666 777|888 ..."></textarea>
+                    </td>
+                </tr>
+                <tr><td colspan="2" style="font-size:11px; padding:5px;"><i>Pueblos asignados en memoria: <b id="count_assigns" style="color:green;">0</b></i></td></tr>
+            </table>
 
-            <hr style="border-color:#7d510f">
-            <button class="btn btn-default" id="btn_calc_all" style="width:100%; font-size:14px; font-weight:bold; padding:8px;">Calcular y Solicitar Recursos</button>
+            <!-- CÁLCULO MÁGICO -->
+            <div style="text-align:center; padding-top:10px;">
+                <button id="btn_calculate_all" class="btn btn-default" style="font-size:16px; font-weight:bold; padding:12px; width:100%;">3. ¡Calcular Necesidades de Todos los Pueblos!</button>
+                <p style="font-size:12px; margin-top:8px; color:#333;"><i>Al pulsar aquí, el script leerá el nivel de tus edificios y recursos de todos tus pueblos en segundo plano. Luego, ve al Mercado y usa el script con ENTER para enviar.</i></p>
+                <div id="calc_status" style="margin-top:10px; font-weight:bold; color:blue;"></div>
+            </div>
             
-            <div id="am_results" style="margin-top:10px; font-size:12px;"></div>
-            
-            <hr style="border-color:#7d510f">
-            <div style="font-size:11px; text-align:center;">
-                <b>Pueblos esperando recursos: <span style="color:red; font-size:13px">${pendingCount}</span></b><br>
-                <button class="btn btn-cancel" id="btn_clear_reqs" style="margin-top:5px; font-size:10px;">Borrar todas las peticiones</button>
+            <!-- BOTON RESET -->
+            <div style="margin-top:20px; text-align:right;">
+                <button id="btn_clear_reqs" class="btn btn-cancel" style="font-size:10px;">Borrar peticiones pendientes del mercado</button>
             </div>
         </div>
     `;
     $('body').append(html);
 
     function updateUI() {
-        let sel = $('#am_t_select');
-        sel.empty();
-        for (let n in templates) sel.append($('<option>', { value: n, text: n }));
-        if(assignments[game_data.village.id]) sel.val(assignments[game_data.village.id]);
+        let tplNames = Object.keys(templates);
+        $('#list_tpls').text(tplNames.length > 0 ? "Plantillas guardadas: " + tplNames.join(', ') : "Ninguna plantilla guardada.");
+        let sel = $('#mass_tpl_select').empty();
+        tplNames.forEach(n => sel.append($('<option>', {value: n, text: n})));
+        $('#count_assigns').text(Object.keys(assignments).length);
     }
     updateUI();
 
-    $('#btn_save_template').click(function() {
-        let n = $('#am_t_name').val().trim(), b = $('#am_t_b64').val().trim();
-        if (n && b) { templates[n] = b; localStorage.setItem('tw_am_templates', JSON.stringify(templates)); updateUI(); $('#am_t_name').val(''); $('#am_t_b64').val(''); }
+    $('#btn_add_tpl').click(function() {
+        let n = $('#tpl_name').val().trim(), b = $('#tpl_b64').val().trim();
+        if(n && b) { templates[n] = b; localStorage.setItem(LS_TEMPLATES, JSON.stringify(templates)); $('#tpl_name').val(''); $('#tpl_b64').val(''); updateUI(); }
     });
 
     $('#btn_assign').click(function() {
-        let tName = $('#am_t_select').val();
-        if (tName) { assignments[game_data.village.id] = tName; localStorage.setItem('tw_am_assignments', JSON.stringify(assignments)); alert("Plantilla asignada."); }
+        let text = $('#mass_coords').val(), tpl = $('#mass_tpl_select').val();
+        let matches = text.match(/\d+\|\d+/g);
+        if(matches && tpl) {
+            matches.forEach(c => assignments[c] = tpl);
+            localStorage.setItem(LS_ASSIGN, JSON.stringify(assignments));
+            updateUI(); alert(`¡${matches.length} pueblos asignados a ${tpl}!`); $('#mass_coords').val('');
+        }
     });
 
     $('#btn_clear_reqs').click(function() {
-        localStorage.removeItem('tw_am_reqs'); requests = {}; alert("Lista de envíos vaciada."); $('#am_advanced_panel').remove();
+        localStorage.removeItem(LS_REQS); reqs = {}; alert('Lista de envíos borrada.');
     });
 
     function decodeBase64(b64) {
-        try { let bin = atob(b64), s = [], i = 2; while (i < bin.length - 1) { let b1 = bin.charCodeAt(i), b2 = bin.charCodeAt(i+1); i += 2; if (b1 > 18) break; if (b2 === 1) s.push(B_MAP[b1]); } return s; } catch(e) { return []; }
+        try { 
+            let bin = atob(b64), s = [], i = 2; 
+            while (i < bin.length - 1) { 
+                let b1 = bin.charCodeAt(i), b2 = bin.charCodeAt(i+1); i += 2; 
+                if (b1 > 18) break; // Fin de edificios (empieza el texto del nombre)
+                if (b2 === 1) s.push(B_MAP[b1]); // Solo procesar subidas de nivel
+            } 
+            return s; 
+        } catch(e) { return []; }
     }
 
-    $('#btn_calc_all').click(function() {
-        $('#am_results').html('<i>Calculando los próximos 5 edificios...</i>');
-        $.ajax({
-            url: '/interface.php?func=get_building_info', dataType: 'xml',
-            success: function(xml) {
-                let vId = game_data.village.id;
-                let assigned = assignments[vId];
-                if (!assigned || !templates[assigned]) { $('#am_results').html('<b style="color:red">Asigna una plantilla primero.</b>'); return; }
-
-                let seq = decodeBase64(templates[assigned]);
-                let curLvls = game_data.village.buildings;
-                let simLvls = Object.assign({}, curLvls);
-                let next5 = [];
-
-                for (let b of seq) {
-                    if (!b) continue;
-                    let curr = parseInt(curLvls[b] || 0);
-                    let sim = parseInt(simLvls[b] || 0) + 1;
-                    simLvls[b] = sim;
-                    if (sim > curr) {
-                        next5.push({ b: b, target: sim });
-                        if (next5.length === 5) break;
-                    }
-                }
-
-                if (next5.length === 0) { $('#am_results').html('<b style="color:green">Pueblo completado.</b>'); return; }
-
-                let wTot = 0, sTot = 0, iTot = 0;
-                let listHtml = "<b>Próximos 5:</b><br>";
-                
-                next5.forEach(item => {
-                    let node = $(xml).find(item.b);
-                    if(node.length) {
-                        let w = Math.round(node.find('wood').text() * Math.pow(node.find('wood_factor').text(), item.target - 1));
-                        let s = Math.round(node.find('stone').text() * Math.pow(node.find('stone_factor').text(), item.target - 1));
-                        let i = Math.round(node.find('iron').text() * Math.pow(node.find('iron_factor').text(), item.target - 1));
-                        wTot += w; sTot += s; iTot += i;
-                        listHtml += `- ${B_ES[item.b] || item.b} (Nvl ${item.target})<br>`;
-                    }
+    $('#btn_calculate_all').click(async function() {
+        $('#calc_status').text('⏳ Descargando niveles de edificios de todos tus pueblos...');
+        let bHtml = await $.get('/game.php?screen=overview_villages&mode=buildings&page=-1');
+        
+        $('#calc_status').text('⏳ Descargando recursos actuales...');
+        let pHtml = await $.get('/game.php?screen=overview_villages&mode=prod&page=-1');
+        
+        $('#calc_status').text('⏳ Descargando fórmula de costes...');
+        let xml = await $.get('/interface.php?func=get_building_info');
+        
+        // Extraer edificios
+        let buildings = {}, bMap = [];
+        $(bHtml).find('#buildings_table th').each(function(i) {
+            let img = $(this).find('img').attr('src');
+            if(img) { let m = img.match(/buildings\/(mid-)?([a-z_]+)\.png/); if(m) bMap[i] = m[2]; }
+        });
+        
+        $(bHtml).find('#buildings_table tr').each(function() {
+            let m = $(this).text().match(/\d+\|\d+/);
+            if(m) {
+                buildings[m[0]] = {};
+                $(this).find('td').each(function(i) {
+                    if(bMap[i]) buildings[m[0]][bMap[i]] = parseInt($(this).text()) || 0;
                 });
-
-                // LIMITE DE ALMACEN: No pedir más de lo que cabe restando lo que ya hay
-                let cap = parseInt(game_data.village.storage_max);
-                let cW = game_data.village.wood, cS = game_data.village.stone, cI = game_data.village.iron;
-                
-                let reqW = Math.max(0, Math.min(wTot - cW, cap - cW));
-                let reqS = Math.max(0, Math.min(sTot - cS, cap - cS));
-                let reqI = Math.max(0, Math.min(iTot - cI, cap - cI));
-
-                listHtml += `<br><b>Petición guardada:</b><br>Madera: ${reqW}<br>Barro: ${reqS}<br>Hierro: ${reqI}`;
-
-                if (reqW > 0 || reqS > 0 || reqI > 0) {
-                    requests[vId] = { w: reqW, s: reqS, i: reqI, c: game_data.village.coord };
-                    localStorage.setItem('tw_am_reqs', JSON.stringify(requests));
-                    listHtml += `<br><br><b style="color:green;">¡Pueblo añadido a la lista de envíos! Ve al mercado de otro pueblo.</b>`;
-                } else {
-                    listHtml += `<br><br><b style="color:green;">Tienes recursos suficientes para los 5.</b>`;
-                }
-
-                $('#am_results').html(listHtml);
             }
         });
+
+        // Extraer recursos
+        let resources = {};
+        $(pHtml).find('#production_table tr').each(function() {
+            let m = $(this).text().match(/\d+\|\d+/);
+            if(m) {
+                resources[m[0]] = {
+                    w: parseInt($(this).find('.res.wood').text().replace(/\./g, '')) || 0,
+                    s: parseInt($(this).find('.res.stone').text().replace(/\./g, '')) || 0,
+                    i: parseInt($(this).find('.res.iron').text().replace(/\./g, '')) || 0
+                };
+            }
+        });
+
+        $('#calc_status').text('⏳ Calculando matemáticas de las plantillas...');
+        let newReqs = {};
+
+        // Calcular déficits para los próximos 5 niveles
+        for (let coord in assignments) {
+            let tplBase64 = templates[assignments[coord]];
+            if (!tplBase64 || !buildings[coord] || !resources[coord]) continue;
+
+            let seq = decodeBase64(tplBase64), simLvls = Object.assign({}, buildings[coord]), next5 = [];
+            for (let b of seq) {
+                if(!b) continue;
+                let target = (simLvls[b] || 0) + 1; simLvls[b] = target;
+                if (target > (buildings[coord][b] || 0)) {
+                    next5.push({ b: b, target: target });
+                    if (next5.length === 5) break;
+                }
+            }
+
+            if (next5.length === 0) continue;
+
+            let wTot = 0, sTot = 0, iTot = 0;
+            next5.forEach(item => {
+                let node = $(xml).find(item.b);
+                if(node.length) {
+                    wTot += Math.round(node.find('wood').text() * Math.pow(node.find('wood_factor').text(), item.target - 1));
+                    sTot += Math.round(node.find('stone').text() * Math.pow(node.find('stone_factor').text(), item.target - 1));
+                    iTot += Math.round(node.find('iron').text() * Math.pow(node.find('iron_factor').text(), item.target - 1));
+                }
+            });
+
+            let reqW = Math.max(0, wTot - resources[coord].w);
+            let reqS = Math.max(0, sTot - resources[coord].s);
+            let reqI = Math.max(0, iTot - resources[coord].i);
+
+            if (reqW > 0 || reqS > 0 || reqI > 0) newReqs[coord] = { w: reqW, s: reqS, i: reqI };
+        }
+
+        localStorage.setItem(LS_REQS, JSON.stringify(newReqs));
+        let count = Object.keys(newReqs).length;
+        $('#calc_status').html(`<span style="color:green; font-size:15px;">✅ ¡Éxito! <b>${count} pueblos</b> necesitan recursos.<br>Cierra esta ventana, ve al MERCADO y pulsa el script para mandar con ENTER.</span>`);
     });
 })();
